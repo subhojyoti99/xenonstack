@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"log"
 
@@ -18,6 +19,29 @@ type Task struct {
 	Description string `json:"description"`
 	DueDate     string `json:"due_date"`
 	Status      string `json:"status"`
+}
+
+func createTable() {
+	db, err := connectDB()
+	if err != nil {
+		log.Fatal("error connection to db")
+	}
+	defer db.Close()
+	projects_table := `CREATE TABLE IF NOT EXISTS Project_Details (
+			Id INTEGER PRIMARY KEY AUTOINCREMENT UNIQUE,
+			Title TEXT NOT NULL,
+			Description TEXT,
+			Due_date TEXT,
+			Status TEXT,
+			CHECK ( Status IN ("Pending","In Progress","Completed"))
+			);`
+	query, err := db.Prepare(projects_table)
+	fmt.Println("Table created successfully!")
+	if err != nil {
+		log.Fatal(err)
+		fmt.Println("Table already created!")
+	}
+	query.Exec()
 }
 
 func main() {
@@ -35,31 +59,10 @@ func main() {
 	r.Run(":8080")
 }
 
-func createTable() {
-	db, err := connectDB()
-	if err != nil {
-		log.Fatal("error conneting to db")
-	}
-	defer db.Close()
-	tasks_table := `CREATE TABLE IF NOT EXISTS tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT,
-            due_date DATE,
-            status TEXT
-			);`
-	query, err := db.Prepare(tasks_table)
-	if err != nil {
-		log.Fatal(err)
-	}
-	query.Exec()
-	fmt.Println("Table created successfully!")
-	return
-}
-
 // Database connection function
 func connectDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", "my_assignment.db")
+	db, err := sql.Open("sqlite3", "my_task.db")
+	fmt.Println("db connected successfully!")
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +74,7 @@ func createTaskHandler(c *gin.Context) {
 	var newTask Task
 	if err := c.ShouldBindJSON(&newTask); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON payload"})
+		fmt.Println("Invalid JSON payload")
 		return
 	}
 
@@ -82,10 +86,10 @@ func createTaskHandler(c *gin.Context) {
 	}
 	defer db.Close()
 
-	stmt, err := db.Prepare("INSERT INTO tasks (title, description, due_date, status) VALUES (?, ?, ?, ?)")
-	fmt.Println(stmt)
+	stmt, err := db.Prepare("INSERT INTO Project_Details (title, description, due_date, status) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare SQL statement"})
+		fmt.Println("Failed to prepare SQL statement")
 		return
 	}
 	defer stmt.Close()
@@ -93,6 +97,7 @@ func createTaskHandler(c *gin.Context) {
 	result, err := stmt.Exec(newTask.Title, newTask.Description, newTask.DueDate, newTask.Status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert task into the database"})
+		fmt.Println("Failed to insert task into the database")
 		return
 	}
 
@@ -100,6 +105,7 @@ func createTaskHandler(c *gin.Context) {
 	newTask.ID = int(taskID)
 
 	c.JSON(http.StatusCreated, newTask)
+	fmt.Println("Project details inserted successfully!")
 }
 
 // Part 2: Retrieve a task
@@ -115,7 +121,7 @@ func retrieveTaskHandler(c *gin.Context) {
 	defer db.Close()
 
 	var task Task
-	err = db.QueryRow("SELECT id, title, description, due_date, status FROM tasks WHERE id = ?", taskID).
+	err = db.QueryRow("SELECT * FROM Project_Details WHERE id = ?", taskID).
 		Scan(&task.ID, &task.Title, &task.Description, &task.DueDate, &task.Status)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
@@ -125,17 +131,19 @@ func retrieveTaskHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, task)
 }
 
-// Part 3: Update a task
+// // Part 3: Update a task
 func updateTaskHandler(c *gin.Context) {
-	taskID := c.Param("id")
+	// Get the task ID from the request URL parameter
+	taskIDStr := c.Param("id")
 
-	var updatedTask Task
-	if err := c.ShouldBindJSON(&updatedTask); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON payload"})
+	// Check if the taskID is valid and parse it to an integer
+	taskID, err := strconv.Atoi(taskIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
 		return
 	}
 
-	// Update the task in the database
+	// Retrieve the task from the database
 	db, err := connectDB()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database connection error"})
@@ -143,7 +151,31 @@ func updateTaskHandler(c *gin.Context) {
 	}
 	defer db.Close()
 
-	stmt, err := db.Prepare("UPDATE tasks SET title=?, description=?, due_date=?, status=? WHERE id=?")
+	// Query the task from the database using the ID
+	row := db.QueryRow("SELECT * FROM Project_Details WHERE ID = ?", taskID)
+	fmt.Println("----------++++---------", row)
+	var task Task
+	err = row.Scan(&task.ID, &task.Title, &task.Description, &task.DueDate, &task.Status)
+	fmt.Println("+++++++++++", task)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve task"})
+		return
+	}
+
+	// Parse the request JSON payload to get the updated task details
+	var updatedTask Task
+	if err := c.ShouldBindJSON(&updatedTask); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON payload"})
+		return
+	}
+
+	// Update the task details in the database
+	stmt, err := db.Prepare("UPDATE Project_Details SET Title=?, Description=?, Due_Date=?, Status=? WHERE ID=?")
+	fmt.Println("Project  details updated")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare SQL statement"})
 		return
@@ -152,12 +184,101 @@ func updateTaskHandler(c *gin.Context) {
 
 	_, err = stmt.Exec(updatedTask.Title, updatedTask.Description, updatedTask.DueDate, updatedTask.Status, taskID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update task in the database"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update task"})
 		return
 	}
 
+	// Set the ID of the updated task to the original task ID
+	updatedTask.ID = taskID
+
 	c.JSON(http.StatusOK, updatedTask)
 }
+
+// // Part 3: Update a task
+// func updateTaskHandler(c *gin.Context) {
+// 	taskIDStr := c.Param("id")
+// 	// Check if the taskID is valid and parse it to an integer
+// 	taskID, err := strconv.Atoi(taskIDStr)
+// 	if err != nil {
+// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
+// 		return
+// 	}
+
+// 	// Check if the task with the given ID exists in the database
+// 	db, err := connectDB()
+// 	if err != nil {
+// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database connection error"})
+// 		return
+// 	}
+// 	defer db.Close()
+
+// 	// var updatedTask Task
+// 	// if err := c.ShouldBindJSON(&updatedTask); err != nil {
+// 	// 	c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON payload"})
+// 	// 	return
+// 	// }
+
+// 	// Query the task from the database using the ID
+// 	row := db.QueryRow("SELECT * FROM tasks WHERE ID = ?", taskID)
+
+// 	var task Task
+// 	err = row.Scan(&task.ID, &task.Title, &task.Description, &task.DueDate, &task.Status)
+// 	if err != nil {
+// 		if err == sql.ErrNoRows {
+// 			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+// 			return
+// 		}
+// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve task"})
+// 		return
+// 	}
+
+// 	// // Update the task in the database
+// 	// db, err := connectDB()
+// 	// if err != nil {
+// 	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "Database connection error"})
+// 	// 	return
+// 	// }
+// 	// defer db.Close()
+
+// 	// stmt, err := db.Prepare("UPDATE Project_Details SET title=?, description=?, due_date=?, status=? WHERE id=?")
+// 	// if err != nil {
+// 	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare SQL statement"})
+// 	// 	return
+// 	// }
+// 	// defer stmt.Close()
+
+// 	// _, err = stmt.Exec(updatedTask.Title, updatedTask.Description, updatedTask.DueDate, updatedTask.Status, taskID)
+// 	// if err != nil {
+// 	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update task in the database"})
+// 	// 	return
+// 	// }
+
+// 	// Parse the request JSON payload to get the updated task details
+// 	var updatedTask Task
+// 	if err := c.ShouldBindJSON(&updatedTask); err != nil {
+// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON payload"})
+// 		return
+// 	}
+
+// 	// Update the task details in the database
+// 	stmt, err := db.Prepare("UPDATE tasks SET Title=?, Description=?, DueDate=?, Status=? WHERE ID=?")
+// 	if err != nil {
+// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare SQL statement"})
+// 		return
+// 	}
+// 	defer stmt.Close()
+
+// 	_, err = stmt.Exec(updatedTask.Title, updatedTask.Description, updatedTask.DueDate, updatedTask.Status, taskID)
+// 	if err != nil {
+// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update task"})
+// 		return
+// 	}
+
+// 	// Set the ID of the updated task to the original task ID
+// 	updatedTask.ID = taskID
+
+// 	c.JSON(http.StatusOK, updatedTask)
+// }
 
 // Part 4: Delete a task
 func deleteTaskHandler(c *gin.Context) {
@@ -171,7 +292,7 @@ func deleteTaskHandler(c *gin.Context) {
 	}
 	defer db.Close()
 
-	stmt, err := db.Prepare("DELETE FROM tasks WHERE id=?")
+	stmt, err := db.Prepare("DELETE FROM Project_Details WHERE id=?")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare SQL statement"})
 		return
@@ -187,7 +308,7 @@ func deleteTaskHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Task deleted successfully"})
 }
 
-// Part 5: List all tasks
+// Part 5: List all Project_Details
 func listTasksHandler(c *gin.Context) {
 	// Retrieve all tasks from the database
 	db, err := connectDB()
@@ -197,14 +318,14 @@ func listTasksHandler(c *gin.Context) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query("SELECT id, title, description, due_date, status FROM tasks")
+	rows, err := db.Query("SELECT id, title, description, due_date, status FROM Project_Details")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch tasks from the database"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch Project_Details from the database"})
 		return
 	}
 	defer rows.Close()
 
-	var tasks []Task
+	var Project_Details []Task
 	for rows.Next() {
 		var task Task
 		err := rows.Scan(&task.ID, &task.Title, &task.Description, &task.DueDate, &task.Status)
@@ -212,8 +333,8 @@ func listTasksHandler(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan task from the database"})
 			return
 		}
-		tasks = append(tasks, task)
+		Project_Details = append(Project_Details, task)
 	}
 
-	c.JSON(http.StatusOK, tasks)
+	c.JSON(http.StatusOK, Project_Details)
 }
