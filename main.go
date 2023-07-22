@@ -21,29 +21,6 @@ type Task struct {
 	Status      string `json:"status"`
 }
 
-func createTable() {
-	db, err := connectDB()
-	if err != nil {
-		log.Fatal("error connection to db")
-	}
-	defer db.Close()
-	projects_table := `CREATE TABLE IF NOT EXISTS Project_Details (
-			Id INTEGER PRIMARY KEY AUTOINCREMENT UNIQUE,
-			Title TEXT NOT NULL,
-			Description TEXT,
-			Due_date TEXT,
-			Status TEXT,
-			CHECK ( Status IN ("Pending","In Progress","Completed"))
-			);`
-	query, err := db.Prepare(projects_table)
-	fmt.Println("Table created successfully!")
-	if err != nil {
-		log.Fatal(err)
-		fmt.Println("Table already created!")
-	}
-	query.Exec()
-}
-
 func main() {
 	r := gin.Default()
 
@@ -57,6 +34,30 @@ func main() {
 	r.GET("/tasks", listTasksHandler)
 
 	r.Run(":8080")
+}
+
+// Create table
+func createTable() {
+	db, err := connectDB()
+	if err != nil {
+		log.Fatal("error connection to db")
+	}
+	defer db.Close()
+	projects_table := `CREATE TABLE IF NOT EXISTS Project_Details (
+			Id INTEGER PRIMARY KEY AUTOINCREMENT UNIQUE,
+			Title TEXT NOT NULL,
+			Description TEXT,
+			Due_date TEXT,
+			Status TEXT,
+			CHECK ( Status IN ("pending","in progress","completed"))
+			);`
+	query, err := db.Prepare(projects_table)
+	fmt.Println("Table created successfully!")
+	if err != nil {
+		log.Fatal(err)
+		fmt.Println("Table already created!")
+	}
+	query.Exec()
 }
 
 // Database connection function
@@ -105,7 +106,7 @@ func createTaskHandler(c *gin.Context) {
 	newTask.ID = int(taskID)
 
 	c.JSON(http.StatusCreated, newTask)
-	fmt.Println("Project details inserted successfully!")
+	fmt.Println("Project details inserted successfully!", newTask)
 }
 
 // Part 2: Retrieve a task
@@ -123,6 +124,7 @@ func retrieveTaskHandler(c *gin.Context) {
 	var task Task
 	err = db.QueryRow("SELECT * FROM Project_Details WHERE id = ?", taskID).
 		Scan(&task.ID, &task.Title, &task.Description, &task.DueDate, &task.Status)
+	fmt.Println("Project get by ID", taskID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
@@ -131,7 +133,7 @@ func retrieveTaskHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, task)
 }
 
-// // Part 3: Update a task
+// Part 3: Update a task
 func updateTaskHandler(c *gin.Context) {
 	// Get the task ID from the request URL parameter
 	taskIDStr := c.Param("id")
@@ -175,7 +177,7 @@ func updateTaskHandler(c *gin.Context) {
 
 	// Update the task details in the database
 	stmt, err := db.Prepare("UPDATE Project_Details SET Title=?, Description=?, Due_Date=?, Status=? WHERE ID=?")
-	fmt.Println("Project  details updated")
+	fmt.Println("Project details updated", taskID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare SQL statement"})
 		return
@@ -292,7 +294,23 @@ func deleteTaskHandler(c *gin.Context) {
 	}
 	defer db.Close()
 
+	// Query the task from the database using the ID
+	row := db.QueryRow("SELECT * FROM Project_Details WHERE ID = ?", taskID)
+	fmt.Println("Project not exist")
+	var task Task
+	err = row.Scan(&task.ID, &task.Title, &task.Description, &task.DueDate, &task.Status)
+	fmt.Println("+++++++++++", task)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve task"})
+		return
+	}
+
 	stmt, err := db.Prepare("DELETE FROM Project_Details WHERE id=?")
+	fmt.Println("Project deleted successfully!")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare SQL statement"})
 		return
@@ -302,6 +320,7 @@ func deleteTaskHandler(c *gin.Context) {
 	_, err = stmt.Exec(taskID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete task from the database"})
+		fmt.Println()
 		return
 	}
 
@@ -319,6 +338,7 @@ func listTasksHandler(c *gin.Context) {
 	defer db.Close()
 
 	rows, err := db.Query("SELECT id, title, description, due_date, status FROM Project_Details")
+	fmt.Println("Project List Shown")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch Project_Details from the database"})
 		return
