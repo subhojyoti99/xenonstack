@@ -3,10 +3,10 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
-
-	"log"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/mattn/go-sqlite3"
@@ -48,8 +48,7 @@ func createTable() {
 			Title TEXT NOT NULL,
 			Description TEXT,
 			Due_date TEXT,
-			Status TEXT,
-			CHECK ( Status IN ("pending","in progress","completed"))
+			Status TEXT
 			);`
 	query, err := db.Prepare(projects_table)
 	fmt.Println("Table created successfully!")
@@ -76,6 +75,33 @@ func createTaskHandler(c *gin.Context) {
 	if err := c.ShouldBindJSON(&newTask); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON payload"})
 		fmt.Println("Invalid JSON payload")
+		return
+	}
+
+	// Validation on the required field
+	if newTask.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Title is required"})
+		return
+	}
+	if newTask.Description == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Description is required"})
+		return
+	}
+	if newTask.DueDate == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Due Date is required"})
+		return
+	}
+
+	// Status validation for pending in progress and completed
+	if newTask.Status != "Pending" || newTask.Status == "In Progress" || newTask.Status == "Completed" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Status will be : Pending, In Progress, Completed."})
+		return
+	}
+
+	// Validate the date format (DD-MM-YYYY)
+	_, err := time.Parse("02/01/2006", newTask.DueDate)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Due Date format. Use DD/MM/YYYY"})
 		return
 	}
 
